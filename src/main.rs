@@ -1,8 +1,8 @@
-use std::{env, time::Duration, collections::HashMap};
+use std::{env, time::Duration, collections::HashMap, fs};
 
 use nostr_sdk::prelude::*;
 use nostr_sdk::blocking::Client;
-use repl_rs::{Repl, Command, Value, Result, Parameter, Convert};
+use repl_rs::{Repl, Command, Error, Value, Result, Parameter, Convert};
 
 struct Context {
     pub client: Client,
@@ -44,6 +44,12 @@ fn main() {
                 .with_parameter(Parameter::new("title").set_default("").unwrap()).unwrap(),
         )
         .add_command(
+            Command::new("cp", cp)
+                .with_parameter(Parameter::new("file").set_required(true).unwrap()).unwrap()
+                .with_parameter(Parameter::new("kind").set_default("1").unwrap()).unwrap()
+                .with_parameter(Parameter::new("title").set_default("").unwrap()).unwrap(),
+        )
+        .add_command(
             Command::new("gets", gets)
                 .with_parameter(Parameter::new("id").set_required(true).unwrap()).unwrap()
         )
@@ -57,6 +63,22 @@ fn main() {
 
     println!("Nostr CLI client");
     repl.run().unwrap();
+}
+
+fn cp(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
+    let file_name = args["file"].to_string();
+    match fs::read_to_string(file_name) {
+        Ok(msg) => {
+            let kind: i32 = args["kind"].convert().unwrap_or(1);
+            let title = args["title"].to_string();
+            
+            internal_send_event(msg, kind, title, context)    
+        },
+        Err(error) => {
+            // println!("{}", error);
+            Err(Error::IllegalRequiredError(error.to_string()))
+        }
+    }
 }
 
 fn gets(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
@@ -93,6 +115,10 @@ fn puts(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<St
     let kind: i32 = args["kind"].convert().unwrap_or(1);
     let title = args["title"].to_string();
 
+    internal_send_event(msg, kind, title, context)
+}
+
+fn internal_send_event(msg: String, kind: i32, title: String, context: &mut Context) -> Result<Option<String>> {
     let mut tags = Vec::new();
     if title.len() > 0 {
         tags.push(Tag::Title(title))
@@ -109,9 +135,6 @@ fn puts(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<St
         },
         _ => Ok(Some("Event kind not supported".into()))
     }
-
-    // let builder = EventBuilder::long_form_text_note("# heading  body  [link](https://extrabits.io)", &[]);
-    // let event_id = client.send_event(builder.to_event(&my_keys)?).await?;
 }
 
 fn quit(_args: HashMap<String, Value>, _context: &mut Context) -> Result<Option<String>> {
