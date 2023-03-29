@@ -13,18 +13,19 @@ struct Context {
 fn main() {
     // export SECRET_KEY=$(cat ~/.nostr/key)
     
-    // let secret = env::var("SECRET_KEY").expect("Secret key not set");
+    let secret = env::var("SECRET_KEY").expect("Secret key not set");
 
-    // let my_keys = Keys::from_sk_str(secret.as_str()).unwrap();
-    let my_keys = Keys::generate();
+    let my_keys = Keys::from_sk_str(secret.as_str()).unwrap();
+    // let my_keys = Keys::generate();
 
     let pub_key = my_keys.public_key();
     println!("Bech32 PubKey: {}", pub_key.to_bech32().unwrap());
-    println!("PubKey: {}", pub_key.to_string());
+    // println!("PubKey: {}", pub_key.to_string());
 
     let client = Client::new(&my_keys);
     // client.add_relay("wss://relay.damus.io", None).await?;
     client.add_relay("ws://nostr.extrabits.io", None).unwrap();
+    // client.add_relay("ws://localhost:8080", None).unwrap();
     
     client.connect();
 
@@ -38,7 +39,9 @@ fn main() {
         .with_description("Nostr CLI client")
         .add_command(
             Command::new("puts", puts)
-                .with_parameter(Parameter::new("message").set_required(true).unwrap()).unwrap(),
+                .with_parameter(Parameter::new("message").set_required(true).unwrap()).unwrap()
+                .with_parameter(Parameter::new("kind").set_default("1").unwrap()).unwrap()
+                .with_parameter(Parameter::new("title").set_default("").unwrap()).unwrap(),
         )
         .add_command(
             Command::new("gets", gets)
@@ -87,10 +90,24 @@ fn ls(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<Stri
 
 fn puts(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
     let msg = args["message"].to_string();
+    let kind: i32 = args["kind"].convert().unwrap_or(1);
+    let title = args["title"].to_string();
 
-    match context.client.publish_text_note(msg, &[]) {
-        Ok(event_id) => Ok(Some(format!("Just sent event ID {}", event_id))),
-        Err(error) => Ok(Some(error.to_string())),
+    let mut tags = Vec::new();
+    if title.len() > 0 {
+        tags.push(Tag::Title(title))
+    }
+
+    match kind {
+        1 => match context.client.publish_text_note(msg, &tags) {
+            Ok(event_id) => Ok(Some(format!("Just sent event ID {}", event_id))),
+            Err(error) => Ok(Some(error.to_string())),
+        },
+        30023 => match context.client.send_event(EventBuilder::long_form_text_note(msg, &tags).to_event(&context.client.keys()).unwrap()) {
+            Ok(event_id) => Ok(Some(format!("Just sent event ID {}", event_id))),
+            Err(error) => Ok(Some(error.to_string())),
+        },
+        _ => Ok(Some("Event kind not supported".into()))
     }
 
     // let builder = EventBuilder::long_form_text_note("# heading  body  [link](https://extrabits.io)", &[]);
