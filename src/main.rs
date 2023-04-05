@@ -1,5 +1,6 @@
-use std::{env, time::Duration, collections::HashMap, fs};
+use std::{env, time::Duration, collections::HashMap, fs, str::FromStr};
 
+use chrono::DateTime;
 use nostr_sdk::prelude::*;
 use nostr_sdk::blocking::Client;
 use repl_rs::{Repl, Command, Error, Value, Result, Parameter, Convert};
@@ -38,24 +39,24 @@ fn main() {
         .with_name("nostr-test")
         .with_description("Nostr CLI client")
         .add_command(
-            Command::new("puts", puts)
-                .with_parameter(Parameter::new("message").set_required(true).unwrap()).unwrap()
-                .with_parameter(Parameter::new("kind").set_default("1").unwrap()).unwrap()
-                .with_parameter(Parameter::new("title").set_default("").unwrap()).unwrap(),
+            add_tag_params(
+                Command::new("puts", puts)
+                    .with_parameter(Parameter::new("message").set_required(true).unwrap()).unwrap())
         )
         .add_command(
-            Command::new("cp", cp)
-                .with_parameter(Parameter::new("file").set_required(true).unwrap()).unwrap()
-                .with_parameter(Parameter::new("kind").set_default("1").unwrap()).unwrap()
-                .with_parameter(Parameter::new("title").set_default("").unwrap()).unwrap(),
+            add_tag_params(
+                Command::new("cp", cp)
+                    .with_parameter(Parameter::new("file").set_required(true).unwrap()).unwrap())
         )
         .add_command(
-            Command::new("gets", gets)
-                .with_parameter(Parameter::new("id").set_required(true).unwrap()).unwrap()
+            add_id_param(Command::new("del", del))
+        )
+        .add_command(
+            add_id_param(Command::new("gets", gets))
         )
         .add_command(
             Command::new("ls", ls)
-                .with_parameter(Parameter::new("minutes").set_default("60").unwrap()).unwrap()
+                .with_parameter(Parameter::new("limit").set_default("10").unwrap()).unwrap()
         )
         .add_command(
             Command::new("quit", quit)
@@ -67,61 +68,86 @@ fn main() {
 
 fn cp(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
     let file_name = args["file"].to_string();
+    
     match fs::read_to_string(file_name) {
-        Ok(msg) => {
-            let kind: i32 = args["kind"].convert().unwrap_or(1);
-            let title = args["title"].to_string();
-            
-            internal_send_event(msg, kind, title, context)    
-        },
-        Err(error) => {
-            // println!("{}", error);
-            Err(Error::IllegalRequiredError(error.to_string()))
-        }
+        Ok(msg) => internal_send_event(msg, args, context),
+        Err(error) => Err(Error::IllegalRequiredError(error.to_string()))
     }
+}
+
+fn del(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
+    let id = args["id"].to_string();
+    let event_id = EventId::from_bech32(id).unwrap();
+
+    match context.client.delete_event(event_id, Some("Deleted by author")) {
+        Ok(id) => Ok(Some(format!("Deleted event {}", id))),
+        Err(error) => Ok(Some(error.to_string())),
+    }
+}
+
+fn format_event(event: &Event) -> String {
+    format!("Event ID: {}\nCreated: {}\nMessage: {}",
+        event.id.to_bech32().unwrap(),
+        event.created_at,
+        &event.content[0..std::cmp::min(100, event.content.len() - 1)])
 }
 
 fn gets(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
     let id = args["id"].to_string();
 
     match context.client.get_events_of(vec!(Filter::new().id(id)), Some(Duration::from_secs(5))) {
-        Ok(event) => Ok(Some(format!("{:?}", event.get(0)))),
+        Ok(events) => {
+            match events.get(0) {
+                Some(event) => Ok(Some(format!("{}", format_event(event)))),
+                None => Ok(Some("Event not found".to_string())),
+            }
+        },
         Err(error) => Ok(Some(error.to_string())),
     }
-    // println!("{:?}", event.get(0));
 }
 
 fn ls(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
-    let minutes: u64 = args["minutes"].convert()?;
+    let limit: usize = args["limit"].convert()?;
 
     let filter = Filter::new()
         .author(context.pub_key)
-        .kind(Kind::TextNote)
-        .since(Timestamp::now() - Duration::from_secs(60 * minutes));
+        .limit(limit);
     let events = context.client.get_events_of(vec!(filter), Some(Duration::from_secs(5))).unwrap();
 
     println!("Found {} events", events.len());
     for event in events.iter() {
-        println!("{:?}", event);
-
-        // client.delete_event(event.id, Some("Just test data")).await?;
+        println!("{}", format_event(event));
     }
 
-    Ok(Some(format!("Getting messages for the last {} minutes", minutes)))
+    Ok(Some(format!("Getting the last {} messages", limit)))
 }
 
 fn puts(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
     let msg = args["message"].to_string();
-    let kind: i32 = args["kind"].convert().unwrap_or(1);
-    let title = args["title"].to_string();
-
-    internal_send_event(msg, kind, title, context)
+    internal_send_event(msg, args, context)
 }
 
-fn internal_send_event(msg: String, kind: i32, title: String, context: &mut Context) -> Result<Option<String>> {
+fn internal_send_event(msg: String, args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
+    let kind: i32 = args["kind"].convert().unwrap_or(1);
+    let title = args["title"].to_string();
+    let publish_date = args["published date"].to_string();
+    let image_url = args["image url"].to_string();
+
     let mut tags = Vec::new();
     if title.len() > 0 {
         tags.push(Tag::Title(title))
+    }
+
+    if publish_date.len() > 0 {
+        //  cp /home/jamin/src/extrabits/post.md 30023 "The Next Web" "6/30/2022" "images/wires.jpg"
+        match DateTime::parse_from_rfc3339(&publish_date) {
+            Ok(date_time) => tags.push(Tag::PublishedAt(Timestamp::from(date_time.timestamp() as u64))),
+            Err(error) => return Ok(Some(error.to_string()))
+        }
+    }
+
+    if image_url.len() > 0 {
+        tags.push(Tag::Image(image_url));
     }
 
     match kind {
@@ -139,4 +165,15 @@ fn internal_send_event(msg: String, kind: i32, title: String, context: &mut Cont
 
 fn quit(_args: HashMap<String, Value>, _context: &mut Context) -> Result<Option<String>> {
     panic!("quitting")
+}
+
+fn add_tag_params(cmd: Command<Context, Error>) -> Command<Context, Error> {
+    cmd.with_parameter(Parameter::new("kind").set_default("1").unwrap()).unwrap()
+        .with_parameter(Parameter::new("title").set_default("").unwrap()).unwrap()
+        .with_parameter(Parameter::new("published date").set_default(&Timestamp::now().to_string()).unwrap()).unwrap()
+        .with_parameter(Parameter::new("image url").set_default("").unwrap()).unwrap()
+}
+
+fn add_id_param(cmd: Command<Context, Error>) -> Command<Context, Error> {
+    cmd.with_parameter(Parameter::new("id").set_required(true).unwrap()).unwrap()
 }
