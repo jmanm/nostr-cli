@@ -1,4 +1,4 @@
-use std::{env, time::Duration, collections::HashMap, fs, str::FromStr};
+use std::{env, time::Duration, collections::HashMap, fs};
 
 use chrono::DateTime;
 use nostr_sdk::prelude::*;
@@ -14,19 +14,24 @@ struct Context {
 fn main() {
     // export SECRET_KEY=$(cat ~/.nostr/key)
     
-    let secret = env::var("SECRET_KEY").expect("Secret key not set");
-
-    let my_keys = Keys::from_sk_str(secret.as_str()).unwrap();
-    // let my_keys = Keys::generate();
+    let my_keys = match env::var("SECRET_KEY") {
+        Ok(secret) => {
+            println!("Reading secret key from environment");
+            Keys::from_sk_str(secret.as_str()).unwrap()
+        }
+        _ => {
+            println!("No secret key specified; generating new keys");
+            Keys::generate()
+        }
+    };
 
     let pub_key = my_keys.public_key();
     println!("Bech32 PubKey: {}", pub_key.to_bech32().unwrap());
-    // println!("PubKey: {}", pub_key.to_string());
 
     let client = Client::new(&my_keys);
     // client.add_relay("wss://relay.damus.io", None).await?;
     client.add_relay("ws://nostr.extrabits.io", None).unwrap();
-    // client.add_relay("ws://localhost:8080", None).unwrap();
+    // client.add_relay("ws://localhost:50001", None).unwrap();
     
     client.connect();
 
@@ -49,7 +54,7 @@ fn main() {
                     .with_parameter(Parameter::new("file").set_required(true).unwrap()).unwrap())
         )
         .add_command(
-            add_id_param(Command::new("del", del))
+            add_id_param(Command::new("rm", rm))
         )
         .add_command(
             add_id_param(Command::new("gets", gets))
@@ -75,7 +80,7 @@ fn cp(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<Stri
     }
 }
 
-fn del(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
+fn rm(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
     let id = args["id"].to_string();
     let event_id = EventId::from_bech32(id).unwrap();
 
@@ -89,21 +94,25 @@ fn format_event(event: &Event) -> String {
     format!("Event ID: {}\nCreated: {}\nMessage: {}",
         event.id.to_bech32().unwrap(),
         event.created_at,
-        &event.content[0..std::cmp::min(100, event.content.len() - 1)])
+        String::from_iter(event.content.chars().take(100))
+    )
 }
 
 fn gets(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
     let id = args["id"].to_string();
-
-    match context.client.get_events_of(vec!(Filter::new().id(id)), Some(Duration::from_secs(5))) {
-        Ok(events) => {
-            match events.get(0) {
-                Some(event) => Ok(Some(format!("{}", format_event(event)))),
-                None => Ok(Some("Event not found".to_string())),
-            }
-        },
-        Err(error) => Ok(Some(error.to_string())),
+    if let Ok(event_id) = EventId::from_bech32(id) {
+        return match context.client.get_events_of(vec!(Filter::new().id(event_id)), Some(Duration::from_secs(5))) {
+            Ok(events) => {
+                match events.get(0) {
+                    Some(event) => Ok(Some(format!("{}", format_event(event)))),
+                    None => Ok(Some("Event not found".to_string())),
+                }
+            },
+            Err(error) => Ok(Some(error.to_string())),
+        }
     }
+
+    Err(Error::IllegalRequiredError("Invalid Id".into()))
 }
 
 fn ls(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
@@ -116,7 +125,7 @@ fn ls(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<Stri
 
     println!("Found {} events", events.len());
     for event in events.iter() {
-        println!("{}", format_event(event));
+        println!("{}\n", format_event(event));
     }
 
     Ok(Some(format!("Getting the last {} messages", limit)))
@@ -139,7 +148,8 @@ fn internal_send_event(msg: String, args: HashMap<String, Value>, context: &mut 
     }
 
     if publish_date.len() > 0 {
-        //  cp /home/jamin/src/extrabits/post.md 30023 "The Next Web" "6/30/2022" "images/wires.jpg"
+        // cp /home/jamin/src/extrabits/posts/post.md 30023 "The Next Web" "2022-06-30T19:32:00-08:00" "images/wires.jpg"
+        // cp /home/jamin/src/extrabits/posts/nostr.md 30023 "Powered By Nostr" "2023-04-13T20:23:00-07:00" "images/power-lines.jpg"
         match DateTime::parse_from_rfc3339(&publish_date) {
             Ok(date_time) => tags.push(Tag::PublishedAt(Timestamp::from(date_time.timestamp() as u64))),
             Err(error) => return Ok(Some(error.to_string()))
@@ -170,7 +180,7 @@ fn quit(_args: HashMap<String, Value>, _context: &mut Context) -> Result<Option<
 fn add_tag_params(cmd: Command<Context, Error>) -> Command<Context, Error> {
     cmd.with_parameter(Parameter::new("kind").set_default("1").unwrap()).unwrap()
         .with_parameter(Parameter::new("title").set_default("").unwrap()).unwrap()
-        .with_parameter(Parameter::new("published date").set_default(&Timestamp::now().to_string()).unwrap()).unwrap()
+        .with_parameter(Parameter::new("published date").set_default("").unwrap()).unwrap()
         .with_parameter(Parameter::new("image url").set_default("").unwrap()).unwrap()
 }
 
