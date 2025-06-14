@@ -1,13 +1,14 @@
-use std::time::Duration;
+use std::{fs, time::Duration};
 
 use crate::Context;
 use chrono::DateTime;
+use clap::{Args, Subcommand};
 use nostr_sdk::prelude::*;
 
-#[derive(Debug)]
+#[derive(Debug, Args)]
 pub struct PublishArgs {
     message: String,
-    kind: Option<i32>,
+    kind: Kind,
     title: Option<String>,
     publish_date: Option<String>,
     image_url: Option<String>,
@@ -15,27 +16,44 @@ pub struct PublishArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    // Cp {
-    //     file_name:
-    // },
+    Cp {
+        file_name: String,
+        #[arg(short, long)]
+        title: Option<String>,
+        #[arg(short, long)]
+        publish_date: Option<String>,
+        #[arg(short, long)]
+        image_url: Option<String>,
+    },
     Gets {
         id: String,
     },
     Ls {
         limit: Option<usize>,
     },
-    Puts(PublishArgs),
+    Puts {
+        message: String,
+    },
     Exit,
 }
 
-// pub fn cp(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
-//     let file_name = args["file"].to_string();
-
-//     match fs::read_to_string(file_name) {
-//         Ok(msg) => internal_send_event(msg, args, context),
-//         Err(error) => Err(Error::IllegalRequiredError(error.to_string()))
-//     }
-// }
+pub async fn cp(
+    file_name: String,
+    title: Option<String>,
+    publish_date: Option<String>,
+    image_url: Option<String>,
+    context: &mut Context
+) -> Result<()> {
+    let message = fs::read_to_string(file_name)?;
+    let args = PublishArgs {
+        message,
+        kind: Kind::LongFormTextNote,
+        title,
+        publish_date,
+        image_url,
+    };
+    internal_send_event(args, context).await
+}
 
 // pub fn rm(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
 //     let id = args["id"].to_string();
@@ -70,7 +88,7 @@ pub async fn ls(limit: Option<usize>, context: &mut Context) -> Result<()> {
     println!("Getting the last {} messages", limit);
 
     let filter = Filter::new()
-        .author(context.pub_key)
+        .author(context.keys.public_key)
         .limit(limit);
     let events = context.client.fetch_events(filter, Duration::from_secs(5)).await?;
 
@@ -82,13 +100,18 @@ pub async fn ls(limit: Option<usize>, context: &mut Context) -> Result<()> {
     Ok(())
 }
 
-pub async fn puts(args: PublishArgs, context: &mut Context) -> Result<()> {
-    internal_send_event(args, context).await?;
+pub async fn puts(message: String, context: &mut Context) -> Result<()> {
+    let args = PublishArgs {
+        message,
+        kind: Kind::TextNote,
+        title: None,
+        publish_date: None,
+        image_url: None,
+    };
+    internal_send_event(args, context).await
 }
 
 async fn internal_send_event(args: PublishArgs, context: &mut Context) -> Result<()> {
-    let kind = args.kind.unwrap_or(1);
-
     let mut tags = Vec::new();
     if let Some(title) = args.title {
         tags.push(Tag::title(title));
@@ -106,21 +129,24 @@ async fn internal_send_event(args: PublishArgs, context: &mut Context) -> Result
         tags.push(Tag::image(url, None));
     }
 
-    match kind {
-        1 => {
+    match args.kind {
+        Kind::TextNote => {
             let evt = EventBuilder::text_note(args.message)
                 .tags(tags)
-                .build(context.pub_key)
-                .sign_with_keys(context.keys)?;
-            context.client.se(msg, &tags).await?
+                .build(context.keys.public_key)
+                .sign_with_keys(&context.keys)?;
+            let result = context.client.send_event(&evt).await?;
+            println!("Just sent event ID {}", result.id());
         }
-        30023 => {
-            let evt = EventBuilder::long_form_text_note(msg)
+        Kind::LongFormTextNote => {
+            let evt = EventBuilder::long_form_text_note(args.message)
                 .tags(tags)
-                .to_event(&context.client.keys());
-            let event_id = context.client.send_event(evt).await?;
-            println!("Just sent event ID {}", event_id);
+                .build(context.keys.public_key)
+                .sign_with_keys(&context.keys)?;
+            let result = context.client.send_event(&evt).await?;
+            println!("Just sent event ID {}", result.id());
         }
-        _ => println!("Event kind not supported".into())
+        _ => println!("Event kind {} not supported", args.kind)
     }
+    Ok(())
 }
