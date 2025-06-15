@@ -47,9 +47,6 @@ async fn main() -> Result<(), String> {
         keys,
     };
 
-    //     .add_command(
-    //         add_id_param(Command::new("rm", rm))
-    //     )
 
     println!("Nostr CLI client");
     loop {
@@ -91,6 +88,8 @@ async fn respond(line: &str, context: &mut Context) -> Result<bool, String> {
             commands::ls(limit, context).await.map_err(|e| e.to_string())?,
         commands::Commands::Puts { message } =>
             commands::puts(message, context).await.map_err(|e| e.to_string())?,
+        commands::Commands::Rm { id } =>
+            commands::rm(id, context).await.map_err(|e| e.to_string())?,
     }
     Ok(false)
 }

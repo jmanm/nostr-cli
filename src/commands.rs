@@ -34,6 +34,9 @@ pub enum Commands {
     Puts {
         message: String,
     },
+    Rm {
+        id: String,
+    },
     Exit,
 }
 
@@ -55,15 +58,17 @@ pub async fn cp(
     internal_send_event(args, context).await
 }
 
-// pub fn rm(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
-//     let id = args["id"].to_string();
-//     let event_id = EventId::from_bech32(&id).unwrap();
-
-//     match context.client.delete_event(event_id, Some("Deleted by author")) {
-//         Ok(id) => Ok(Some(format!("Deleted event {}", id))),
-//         Err(error) => Ok(Some(error.to_string())),
-//     }
-// }
+pub async fn rm(id: String, context: &mut Context) -> Result<()> {
+    let event_id = EventId::from_bech32(&id).unwrap();
+    let evt = EventBuilder::delete(EventDeletionRequest {
+        ids: vec![event_id],
+        coordinates: vec![],
+        reason: Some("Deleted by author".to_string()),
+    });
+    context.client.send_event_builder(evt).await?;
+    println!("Deleted event {}", event_id);
+    Ok(())
+}
 
 fn format_event(event: &Event) -> String {
     format!("Event ID: {}\nCreated: {}\nMessage: {}",
@@ -131,19 +136,13 @@ async fn internal_send_event(args: PublishArgs, context: &mut Context) -> Result
 
     match args.kind {
         Kind::TextNote => {
-            let evt = EventBuilder::text_note(args.message)
-                .tags(tags)
-                .build(context.keys.public_key)
-                .sign_with_keys(&context.keys)?;
-            let result = context.client.send_event(&evt).await?;
+            let evt = EventBuilder::text_note(args.message).tags(tags);
+            let result = context.client.send_event_builder(evt).await?;
             println!("Just sent event ID {}", result.id());
         }
         Kind::LongFormTextNote => {
-            let evt = EventBuilder::long_form_text_note(args.message)
-                .tags(tags)
-                .build(context.keys.public_key)
-                .sign_with_keys(&context.keys)?;
-            let result = context.client.send_event(&evt).await?;
+            let evt = EventBuilder::long_form_text_note(args.message).tags(tags);
+            let result = context.client.send_event_builder(evt).await?;
             println!("Just sent event ID {}", result.id());
         }
         _ => println!("Event kind {} not supported", args.kind)
