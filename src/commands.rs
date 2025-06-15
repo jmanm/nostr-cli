@@ -40,7 +40,23 @@ pub enum Commands {
     Exit,
 }
 
-pub async fn cp(
+pub async fn handle_command(command: Commands, context: &mut Context) -> Result<()> {
+    match command {
+        Commands::Cp { file_name, title, publish_date, image_url } =>
+            cp(file_name, title, publish_date, image_url, context).await,
+        Commands::Gets { id } =>
+            gets(id, context).await,
+        Commands::Ls { limit } =>
+            ls(limit, context).await,
+        Commands::Puts { message } =>
+            puts(message, context).await,
+        Commands::Rm { id } =>
+            rm(id, context).await,
+        _ => Ok(()),
+    }
+}
+
+async fn cp(
     file_name: String,
     title: Option<String>,
     publish_date: Option<String>,
@@ -58,7 +74,7 @@ pub async fn cp(
     internal_send_event(args, context).await
 }
 
-pub async fn rm(id: String, context: &mut Context) -> Result<()> {
+async fn rm(id: String, context: &mut Context) -> Result<()> {
     let event_id = EventId::from_bech32(&id).unwrap();
     let evt = EventBuilder::delete(EventDeletionRequest {
         ids: vec![event_id],
@@ -78,7 +94,7 @@ fn format_event(event: &Event) -> String {
     )
 }
 
-pub async fn gets(id: String, context: &mut Context) -> Result<()> {
+async fn gets(id: String, context: &mut Context) -> Result<()> {
     let event_id = EventId::from_bech32(&id)?;
     let events = context.client.fetch_events(Filter::new().id(event_id), Duration::from_secs(5)).await?;
     match events.first() {
@@ -88,7 +104,7 @@ pub async fn gets(id: String, context: &mut Context) -> Result<()> {
     Ok(())
 }
 
-pub async fn ls(limit: Option<usize>, context: &mut Context) -> Result<()> {
+async fn ls(limit: Option<usize>, context: &mut Context) -> Result<()> {
     let limit = limit.unwrap_or(10);
     println!("Getting the last {} messages", limit);
 
@@ -105,7 +121,7 @@ pub async fn ls(limit: Option<usize>, context: &mut Context) -> Result<()> {
     Ok(())
 }
 
-pub async fn puts(message: String, context: &mut Context) -> Result<()> {
+async fn puts(message: String, context: &mut Context) -> Result<()> {
     let args = PublishArgs {
         message,
         kind: Kind::TextNote,
