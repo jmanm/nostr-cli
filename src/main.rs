@@ -4,6 +4,7 @@ use std::env;
 
 use nostr_sdk::{Client, Keys, ToBech32};
 use clap::Parser;
+use rustyline::{error::ReadlineError, DefaultEditor};
 
 mod commands;
 
@@ -47,24 +48,48 @@ async fn main() -> Result<(), String> {
         keys,
     };
 
-
+    let mut rl = DefaultEditor::new().map_err(|e| e.to_string())?;
+    if rl.load_history(".nostr-cli-history").is_err() {
+        () // noop
+    }
+    
     println!("Nostr CLI client");
     loop {
-        let line = readline().map_err(|e| e.to_string())?;
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
+        let readline = rl.readline("? ");
 
-        match respond(line, &mut ctx).await {
-            Ok(quit) => {
-                if quit {
-                    break;
+        match readline {
+            Ok(line) => {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+
+                rl.add_history_entry(line).map_err(|e| e.to_string())?;
+
+                match respond(line, &mut ctx).await {
+                    Ok(quit) => {
+                        if quit {
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        write!(std::io::stdout(), "{err}").map_err(|e| e.to_string())?;
+                        std::io::stdout().flush().map_err(|e| e.to_string())?;
+                    }
                 }
             }
+            Err(ReadlineError::Interrupted) => {
+                println!("CTRL-C detected, exiting...");
+                break;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("CTRL-D detected, exiting...");
+                // This is triggered by Ctrl-D
+                break;
+            }
             Err(err) => {
-                write!(std::io::stdout(), "{err}").map_err(|e| e.to_string())?;
-                std::io::stdout().flush().map_err(|e| e.to_string())?;
+                println!("Error: {:?}", err);
+                break;
             }
         }
     }
@@ -82,12 +107,4 @@ async fn respond(line: &str, context: &mut Context) -> Result<bool, String> {
         .await
         .map_err(|e| e.to_string())?;
     Ok(false)
-}
-
-fn readline() -> std::io::Result<String> {
-    write!(std::io::stdout(), "$ ")?;
-    std::io::stdout().flush()?;
-    let mut buffer = String::new();
-    std::io::stdin().read_line(&mut buffer)?;
-    Ok(buffer)
 }
