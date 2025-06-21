@@ -38,9 +38,11 @@ async fn main() -> Result<(), String> {
     println!("Bech32 PubKey: {}", keys.public_key.to_bech32().unwrap());
 
     let client = Client::new(keys.clone());
-    // client.add_relay("wss://relay.damus.io").await?;
-    // client.add_relay("wss://nostr.extrabits.io").unwrap();
-    client.add_relay("ws://localhost:5001").await.map_err(|e| e.to_string())?;
+    client.add_relay("wss://relay.damus.io").await.map_err(|e| e.to_string())?;
+    client.add_relay("wss://nostr.land").await.map_err(|e| e.to_string())?;
+    client.add_relay("wss://nos.lol").await.map_err(|e| e.to_string())?;
+    client.add_relay("wss://nostr.extrabits.io").await.map_err(|e| e.to_string())?;
+    // client.add_relay("ws://localhost:5001").await.map_err(|e| e.to_string())?;
     client.connect().await;
 
     let mut ctx = Context {

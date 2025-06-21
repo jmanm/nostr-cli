@@ -25,6 +25,9 @@ pub enum Commands {
         #[arg(short, long)]
         image_url: Option<String>,
     },
+    Fol {
+        pubkey: String,
+    },
     Gets {
         id: String,
     },
@@ -44,6 +47,8 @@ pub async fn handle_command(command: Commands, context: &mut Context) -> Result<
     match command {
         Commands::Cp { file_name, title, publish_date, image_url } =>
             cp(file_name, title, publish_date, image_url, context).await,
+        Commands::Fol { pubkey } =>
+            fol(pubkey, context).await,
         Commands::Gets { id } =>
             gets(id, context).await,
         Commands::Ls { limit } =>
@@ -74,6 +79,20 @@ async fn cp(
     internal_send_event(args, context).await
 }
 
+async fn fol(pubkey: String, context: &mut Context) -> Result<()> {
+    let public_key = PublicKey::parse(&pubkey)?;
+    let mut contacts = context.client.get_contact_list(Duration::from_secs(30)).await?;
+    contacts.push(Contact {
+        public_key,
+        relay_url: None,
+        alias: None,
+    });
+    let evt = EventBuilder::contact_list(contacts);
+    context.client.send_event_builder(evt).await?;
+    println!("Added pubkey {} to contacts", public_key);
+    Ok(())
+}
+
 async fn rm(id: String, context: &mut Context) -> Result<()> {
     let event_id = EventId::from_bech32(&id).unwrap();
     let evt = EventBuilder::delete(EventDeletionRequest {
@@ -87,11 +106,22 @@ async fn rm(id: String, context: &mut Context) -> Result<()> {
 }
 
 fn format_event(event: &Event) -> String {
-    format!("Event ID: {}\nCreated: {}\nMessage: {}",
-        event.id.to_bech32().unwrap(),
-        event.created_at,
-        String::from_iter(event.content.chars().take(100))
-    )
+    let mut lines = vec![
+        format!("Event ID: {}", event.id.to_bech32().unwrap()),
+        format!("Event Kind: {:?}", event.kind),
+        format!("Created: {}", event.created_at.to_human_datetime()),
+    ];
+    if !event.tags.is_empty() {
+        lines.push("Tags".into());
+        for tag in event.tags.iter() {
+            lines.push(format!("Kind: {}; content: {}", tag.kind(), tag.content().unwrap_or_default()));
+        }
+    }
+    let text_content = String::from_iter(event.content.chars().take(100));
+    if !text_content.is_empty() {
+        lines.push(format!("Message: {}", text_content));
+    }
+    return lines.join("\n");
 }
 
 async fn gets(id: String, context: &mut Context) -> Result<()> {
