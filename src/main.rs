@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::{io::Write, time::Duration};
 use std::str::FromStr;
 use std::env;
 
@@ -45,6 +45,15 @@ async fn main() -> Result<(), String> {
     // client.add_relay("ws://localhost:5001").await.map_err(|e| e.to_string())?;
     client.connect().await;
 
+    let username = match client.fetch_metadata(keys.public_key, Duration::from_secs(5)).await {
+        Ok(Some(md)) => md.display_name.unwrap_or(md.name.unwrap_or("Unknown user".into())),
+        Ok(None) => "Unknown user".into(),
+        Err(e) => {
+            println!("Error retrieving username: {}", e);
+            "Unknown user".into()
+        }
+    };
+
     let mut ctx = Context {
         client,
         keys,
@@ -57,7 +66,7 @@ async fn main() -> Result<(), String> {
     
     println!("Nostr CLI client");
     loop {
-        let readline = rl.readline("? ");
+        let readline = rl.readline(&format!("{}>", username));
 
         match readline {
             Ok(line) => {
