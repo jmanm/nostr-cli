@@ -16,6 +16,9 @@ pub struct PublishArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    Bcast {
+        message: String,
+    },
     Cp {
         file_name: String,
         #[arg(short, long)]
@@ -24,6 +27,10 @@ pub enum Commands {
         publish_date: Option<String>,
         #[arg(short, long)]
         image_url: Option<String>,
+    },
+    Dm {
+        pubkey: String,
+        message: String,
     },
     Fol {
         pubkey: String,
@@ -45,8 +52,12 @@ pub enum Commands {
 
 pub async fn handle_command(command: Commands, context: &mut Context) -> Result<()> {
     match command {
+        Commands::Bcast { message } =>
+            bcast(message, context).await,
         Commands::Cp { file_name, title, publish_date, image_url } =>
             cp(file_name, title, publish_date, image_url, context).await,
+        Commands::Dm { pubkey, message } =>
+            dm(pubkey, message, context).await,
         Commands::Fol { pubkey } =>
             fol(pubkey, context).await,
         Commands::Gets { id } =>
@@ -59,6 +70,15 @@ pub async fn handle_command(command: Commands, context: &mut Context) -> Result<
             rm(id, context).await,
         _ => Ok(()),
     }
+}
+
+async fn bcast(message: String, context: &mut Context) -> Result<()> {
+    let contacts = context.client.get_contact_list(Duration::from_secs(5)).await?;
+    for contact in contacts {
+        println!("Sending message to {} ({})", contact.alias.unwrap_or("Unknown alias".into()), contact.public_key);
+        context.client.send_private_msg(contact.public_key, &message, vec![]).await?;
+    }
+    Ok(())
 }
 
 async fn cp(
@@ -77,6 +97,14 @@ async fn cp(
         image_url,
     };
     internal_send_event(args, context).await
+}
+
+async fn dm(pubkey: String, message: String, context: &mut Context) -> Result<()> {
+    let public_key = PublicKey::parse(&pubkey)?;
+    println!("Sending message to {}", public_key.to_string());
+    let result = context.client.send_private_msg(public_key, &message, vec![]).await?;
+    println!("Just sent message ID {}", result.id());
+    Ok(())
 }
 
 async fn fol(pubkey: String, context: &mut Context) -> Result<()> {
@@ -144,7 +172,9 @@ async fn ls(limit: Option<usize>, context: &mut Context) -> Result<()> {
     let events = context.client.fetch_events(filter, Duration::from_secs(5)).await?;
 
     println!("Found {} events", events.len());
-    for event in events.iter() {
+    let mut sorted = Vec::from_iter(events);
+    sorted.sort_by(|e1, e2| e1.created_at.cmp(&e2.created_at));
+    for event in sorted.iter() {
         println!("{}\n", format_event(event));
     }
 
