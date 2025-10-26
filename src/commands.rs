@@ -2,7 +2,7 @@ use std::{fs, time::Duration};
 
 use crate::Context;
 use chrono::DateTime;
-use clap::{Args, Subcommand};
+use clap::{ArgAction, Args, Subcommand};
 use nostr_sdk::prelude::*;
 
 #[derive(Debug, Args)]
@@ -44,6 +44,11 @@ pub enum Commands {
     Puts {
         message: String,
     },
+    Relay {
+      address: String,
+      #[arg(short, long, action = ArgAction::SetTrue)]
+      delete: bool,
+    },
     Rm {
         id: String,
     },
@@ -66,6 +71,8 @@ pub async fn handle_command(command: Commands, context: &mut Context) -> Result<
             ls(limit, context).await,
         Commands::Puts { message } =>
             puts(message, context).await,
+        Commands::Relay { address, delete } =>
+            relay(address, delete, context).await,
         Commands::Rm { id } =>
             rm(id, context).await,
         _ => Ok(()),
@@ -118,6 +125,25 @@ async fn fol(pubkey: String, context: &mut Context) -> Result<()> {
     let evt = EventBuilder::contact_list(contacts);
     context.client.send_event_builder(evt).await?;
     println!("Added pubkey {} to contacts", public_key);
+    Ok(())
+}
+
+async fn relay(address: String, delete: bool, context: &mut Context) ->  Result<()> {
+    // nip 51 or 65
+    match Url::parse(&address) {
+        Ok(url) => {
+            if delete {
+                context.client.remove_relay(&url).await?;
+                println!("Removed relay {}", &url);
+            } else {
+                context.client.add_relay(&url).await?;
+                println!("Added relay {}", &url);
+            }
+        }
+        Err(e) => {
+            println!("Invalid relay URL:  {}", e);
+        }
+    }
     Ok(())
 }
 
