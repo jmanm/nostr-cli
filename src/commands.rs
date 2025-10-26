@@ -4,6 +4,7 @@ use crate::Context;
 use chrono::DateTime;
 use clap::{ArgAction, Args, Subcommand};
 use nostr_sdk::prelude::*;
+use nostr_sdk::nips::nip65::extract_owned_relay_list;
 
 #[derive(Debug, Args)]
 pub struct PublishArgs {
@@ -128,16 +129,47 @@ async fn fol(pubkey: String, context: &mut Context) -> Result<()> {
     Ok(())
 }
 
+fn print_relay_list(list: &Vec<(RelayUrl, Option<RelayMetadata>)>) -> String {
+    list.iter().map(|(url, md)| {
+        let mut result = url.to_string();
+        if let Some(md) = md {
+            result.push_str(&format!(" ({})", md));
+        }
+        result
+    }).collect::<Vec<String>>().join("\n")
+}
+
 async fn relay(address: String, delete: bool, context: &mut Context) ->  Result<()> {
-    // nip 51 or 65
-    match Url::parse(&address) {
+    match RelayUrl::parse(&address) {
         Ok(url) => {
+            let filter = Filter::new()
+                .author(context.keys.public_key)
+                .kind(Kind::RelayList)
+                .limit(1);
+            let relay_events = context.client.fetch_events(filter, Duration::from_secs(5)).await?;
+            let mut relay_list = if relay_events.len() > 0 {
+                extract_owned_relay_list(relay_events.first_owned().unwrap()).collect()
+            } else {
+                Vec::new()
+            };
             if delete {
-                context.client.remove_relay(&url).await?;
-                println!("Removed relay {}", &url);
+                if let Some(ix) = relay_list.iter().position(|u| (*u).0 == url) {
+                    context.client.remove_relay(&url).await?;
+                    relay_list.remove(ix);
+                    let relay_list_str = print_relay_list(&relay_list);
+                    let evt = EventBuilder::relay_list(relay_list);
+                    context.client.send_event_builder(evt).await?;
+                    println!("Removed relay {}\nNew relay list:\n{}", &url, relay_list_str);
+                } else {
+                    println!("Relay was not in user relay list")
+                }
             } else {
                 context.client.add_relay(&url).await?;
-                println!("Added relay {}", &url);
+                relay_list.push((url.clone(), None));
+                let relay_list_str = print_relay_list(&relay_list);
+                let evt = EventBuilder::relay_list(relay_list);
+                context.client.send_event_builder(evt).await?;
+                println!("Added relay {}\nNew relay list:\n{}", &url, relay_list_str);
             }
         }
         Err(e) => {

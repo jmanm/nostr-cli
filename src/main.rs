@@ -42,10 +42,9 @@ async fn main() -> Result<(), String> {
     // client.add_relay("wss://nostr.land").await.map_err(|e| e.to_string())?;
     // client.add_relay("wss://nos.lol").await.map_err(|e| e.to_string())?;
     // client.add_relay("wss://nostr.extrabits.io").await.map_err(|e| e.to_string())?;
-    // client.add_relay("ws://localhost:5001").await.map_err(|e| e.to_string())?;
+    client.add_relay("ws://localhost:5001").await.map_err(|e| e.to_string())?;
     client.connect().await;
-    client.rel
-
+    
     let username = match client.fetch_metadata(keys.public_key, Duration::from_secs(5)).await {
         Ok(Some(md)) => md.display_name.unwrap_or(md.name.unwrap_or("Unknown user".into())),
         Ok(None) => "Unknown user".into(),
